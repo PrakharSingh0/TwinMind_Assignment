@@ -2,6 +2,8 @@ package com.example.twinmind.ui.screens.summary
 
 import android.content.Intent
 import android.media.MediaPlayer
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -201,7 +203,8 @@ fun SummaryScreen(
             }
 
             if (summary == null) {
-                item { EmptyHint("No summary yet") }
+                item { EmptyHint("No summary yet")
+                EmptyHint1("{If summary fails to generate, retry after 1 minute}")}
             } else {
                 item {
                     Text(
@@ -311,6 +314,14 @@ private fun EmptyHint(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
 }
+@Composable
+private fun EmptyHint1(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    )
+}
 
 @Composable
 fun AudioPlayerBottomBar(
@@ -319,67 +330,129 @@ fun AudioPlayerBottomBar(
     onPlay: (AudioChunkEntity) -> Unit,
     onStop: () -> Unit
 ) {
+    var expanded by remember { mutableStateOf(false) }
+
+    val maxHeight = if (expanded) 260.dp else 64.dp
+
     Surface(
-        tonalElevation = 6.dp,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        tonalElevation = 8.dp,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp, max = maxHeight)
+            .animateContentSize()
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                "Audio recordings",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        Column {
 
-            Spacer(Modifier.height(8.dp))
+            /* ---------- HANDLE + HEADER ---------- */
 
-            LazyColumn(modifier = Modifier.heightIn(max = 220.dp)) {
-                items(chunks) { chunk ->
-                    val isPlaying = playingChunkId == chunk.id
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(top = 8.dp, bottom = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Drag Handle
+                Box(
+                    modifier = Modifier
+                        .width(36.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                )
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { if (isPlaying) onStop() else onPlay(chunk) }
-                            .background(
-                                if (isPlaying)
-                                    MaterialTheme.colorScheme.primaryContainer
-                                else Color.Transparent
-                            )
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
+                Spacer(Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Audio recordings",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Icon(
+                        imageVector = if (expanded)
+                            Icons.Default.KeyboardArrowDown
+                        else
+                            Icons.Default.KeyboardArrowUp,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            /* ---------- CONTENT ---------- */
+
+            AnimatedVisibility(visible = expanded) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .heightIn(max = 200.dp)
+                ) {
+                    items(chunks) { chunk ->
+                        val isPlaying = playingChunkId == chunk.id
+
+                        Row(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
                                 .background(
                                     if (isPlaying)
-                                        MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.surfaceVariant
-                                ),
-                            contentAlignment = Alignment.Center
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    else Color.Transparent
+                                )
+                                .clickable {
+                                    if (isPlaying) onStop() else onPlay(chunk)
+                                }
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                if (isPlaying) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
-                                contentDescription = null,
-                                tint = if (isPlaying)
-                                    MaterialTheme.colorScheme.onPrimary
-                                else MaterialTheme.colorScheme.onSurface
-                            )
-                        }
 
-                        Spacer(Modifier.width(12.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isPlaying)
+                                            MaterialTheme.colorScheme.primary
+                                        else
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isPlaying)
+                                        Icons.Rounded.Stop
+                                    else
+                                        Icons.Rounded.PlayArrow,
+                                    contentDescription = null,
+                                    tint = if (isPlaying)
+                                        MaterialTheme.colorScheme.onPrimary
+                                    else
+                                        MaterialTheme.colorScheme.onSurface
+                                )
+                            }
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "Part ${chunks.indexOf(chunk) + 1}",
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                "${formatTime(chunk.startMs)} – ${formatTime(chunk.endMs)}",
-                                style = MaterialTheme.typography.labelSmall
-                            )
+                            Spacer(Modifier.width(12.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Part ${chunks.indexOf(chunk) + 1}",
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "${formatTime(chunk.startMs)} – ${formatTime(chunk.endMs)}",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
                         }
                     }
                 }
@@ -387,6 +460,7 @@ fun AudioPlayerBottomBar(
         }
     }
 }
+
 
 /* ---------- HELPERS ---------- */
 
