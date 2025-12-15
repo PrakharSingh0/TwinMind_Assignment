@@ -69,13 +69,13 @@
 ### 📝 Summary Screen
 <p align="left">
   <img src="https://github.com/user-attachments/assets/718ec643-d488-4f8a-944a-34dc0cd37457"
-       width="210" style="margin-right:16px;"/>
+       width="200" style="margin-right:10px;"/>
   <img src="https://github.com/user-attachments/assets/bdb7c110-8b83-4792-adc1-82beaa25581a"
-       width="210" style="margin-right:16px;"/>
+       width="200" style="margin-right:10px;"/>
   <img src="https://github.com/user-attachments/assets/adca6251-ca04-4207-bca5-8e6bc58ce903"
-       width="210" style="margin-right:16px;"/>
+       width="200" style="margin-right:10px;"/>
    <img src="https://github.com/user-attachments/assets/59714c38-b1e5-4acd-8438-34db6798e929"
-       width="210" />
+       width="200" />
 </p>
 
 ---
