@@ -1,100 +1,155 @@
-// In D:/Android/TwinMind2/app/src/main/java/com/example/twinmind/recording/RecordingService.kt
-
 package com.example.twinmind.recording
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.Service
+import android.app.*
 import android.content.Context
 import android.content.Intent
-import android.os.Build
-import android.os.IBinder
+import android.os.*
 import androidx.core.app.NotificationCompat
+import com.example.twinmind.MainActivity
 import com.example.twinmind.R
-import com.example.twinmind.audio.AudioRecorder // 👈 Make sure you have this import
+import com.example.twinmind.audio.AudioRecorder
+import java.util.concurrent.TimeUnit
 
 class RecordingService : Service() {
 
     companion object {
         const val CHANNEL_ID = "recording_channel"
-        const val CHANNEL_NAME = "Recording"
         const val NOTIFICATION_ID = 1
 
-        const val ACTION_START = "com.example.twinmind.action.START_RECORDING"
-        const val ACTION_STOP = "com.example.twinmind.action.STOP_RECORDING"
-
-        // Exposed so UI can read which file was recorded
         @Volatile
         var lastRecordedFilePath: String? = null
             private set
     }
 
-    // 🔥 FIX: The recorder now lives inside the service
     private var recorder: AudioRecorder? = null
-    private var currentFilePath: String? = null
+    private var startTime = 0L
+
+    private val handler = Handler(Looper.getMainLooper())
+    private lateinit var notificationManager: NotificationManager
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        notificationManager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> startRecordingForeground()
-            ACTION_STOP -> stopRecordingAndStopService()
+            RecordingActions.ACTION_START -> startRecording()
+            RecordingActions.ACTION_STOP -> stopRecording()
         }
-        // no need to restart if system kills us
         return START_NOT_STICKY
     }
 
-    private fun startRecordingForeground() {
-        if (recorder != null) return // already recording
+    private fun contentIntent(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
 
-        // 🔥 FIX: Create and start the recorder here
-        recorder = AudioRecorder(applicationContext)
-        currentFilePath = recorder?.startRecording()
-        lastRecordedFilePath = currentFilePath
-
-        val notification = buildNotification("Recording in progress")
-        startForeground(NOTIFICATION_ID, notification)
+        return PendingIntent.getActivity(
+            this,
+            100,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
     }
 
-    private fun stopRecordingAndStopService() {
+
+    private fun startRecording() {
+        if (recorder != null) return
+
+        // 🔥 Samsung FIX: start foreground IMMEDIATELY
+        startForeground(
+            NOTIFICATION_ID,
+            buildNotification(0L)
+        )
+
+        recorder = AudioRecorder(applicationContext)
+        lastRecordedFilePath = recorder?.startRecording()
+        startTime = System.currentTimeMillis()
+
+        startTimer()
+    }
+
+
+
+
+
+    private fun stopRecording() {
+        handler.removeCallbacksAndMessages(null)
+
         try {
-            // 🔥 FIX: Stop the recorder here
             recorder?.stopRecording()
         } catch (_: Exception) {
-            // Handle exceptions
         } finally {
             recorder = null
-            currentFilePath = null
         }
 
         stopForeground(true)
         stopSelf()
     }
 
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                CHANNEL_NAME,
-                NotificationManager.IMPORTANCE_LOW
-            )
-            mgr.createNotificationChannel(channel)
-        }
+    private fun startTimer() {
+        handler.post(object : Runnable {
+            override fun run() {
+                val elapsed = System.currentTimeMillis() - startTime
+                notificationManager.notify(
+                    NOTIFICATION_ID,
+                    buildNotification(elapsed)
+                )
+                handler.postDelayed(this, 1000)
+            }
+        })
     }
 
-    private fun buildNotification(text: String): Notification {
+    private fun buildNotification(elapsedMs: Long): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("TwinMind Recording")
-            .setContentText(text)
-            .setSmallIcon(R.mipmap.ic_launcher) // or ic_launcher_foreground
+            .setContentText("⏱ ${formatTime(elapsedMs)}")
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
+            .addAction(stopAction())
             .build()
     }
+
+    private fun stopAction(): NotificationCompat.Action {
+        val intent = Intent(this, RecordingService::class.java).apply {
+            action = RecordingActions.ACTION_STOP
+        }
+
+        val pendingIntent = PendingIntent.getService(
+            this,
+            200, // MUST be unique (important for Samsung)
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Action.Builder(
+            0,
+            "Stop",
+            pendingIntent
+        ).build()
+    }
+
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Recording",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+}
+
+private fun formatTime(ms: Long): String {
+    val seconds = TimeUnit.MILLISECONDS.toSeconds(ms)
+    val minutes = seconds / 60
+    val remainingSeconds = seconds % 60
+    return "%02d:%02d".format(minutes, remainingSeconds)
 }

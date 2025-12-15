@@ -39,7 +39,17 @@ fun AppNavHost(navController: NavHostController) {
         // Recording screen
         composable(NavRoutes.RECORDING) {
             RecordingScreen(
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                onFinished = { meetingId ->
+                    if (meetingId > 0) {
+                        navController.navigate("${NavRoutes.SUMMARY}/$meetingId") {
+                            // 🔥 FIX: Pop the recording screen off the back stack
+                            popUpTo(NavRoutes.RECORDING) {
+                                inclusive = true
+                            }
+                        }
+                    }
+                }
             )
         }
 

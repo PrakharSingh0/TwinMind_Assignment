@@ -2,7 +2,6 @@ package com.example.twinmind.audio
 
 import android.app.Service
 import android.content.Intent
-import android.os.Binder
 import android.os.IBinder
 import com.example.twinmind.Graph
 import kotlinx.coroutines.CoroutineScope
@@ -10,8 +9,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class RecordingService : Service() {
@@ -33,8 +30,6 @@ class RecordingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> start()
-            ACTION_PAUSE -> pause()
-            ACTION_RESUME -> resume()
             ACTION_STOP -> {
                 val title = intent.getStringExtra(EXTRA_TITLE)
                 stop(title)
@@ -45,37 +40,22 @@ class RecordingService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        serviceJob.cancel()
+        serviceJob.cancel() // Cancel all coroutines started by this service
     }
 
     private fun start() {
         notificationManager.createNotificationChannel()
-        startForeground(
-            RecordingNotificationManager.NOTIFICATION_ID,
-            notificationManager.buildNotification("00:00", isPaused = false)
-        )
+        startForeground(RecordingNotificationManager.NOTIFICATION_ID, notificationManager.buildNotification("00:00"))
 
         startNewChunk()
         startTimer()
-        _state.value = RecordingState.Recording(0)
-    }
-
-    private fun pause() {
-        audioRecorder.pause()
-        timerJob?.cancel()
-        _state.value = RecordingState.Paused(seconds)
-    }
-
-    private fun resume() {
-        audioRecorder.resume()
-        startTimer()
-        _state.value = RecordingState.Recording(seconds)
     }
 
     private fun stop(title: String?) {
         stopCurrentChunk()
         timerJob?.cancel()
 
+        // Use the service's own scope to ensure this task is managed correctly
         serviceScope.launch {
             val newMeetingId = meetingRepository.createMeeting(
                 title = title ?: "Meeting @ ${System.currentTimeMillis()}",
@@ -92,8 +72,6 @@ class RecordingService : Service() {
             }
             stopSelf()
         }
-
-        _state.value = RecordingState.Idle
     }
 
     private fun startNewChunk() {
@@ -107,20 +85,14 @@ class RecordingService : Service() {
 
     private fun startTimer() {
         timerJob?.cancel()
-        timerJob = serviceScope.launch(Dispatchers.Main) {
+        timerJob = serviceScope.launch(Dispatchers.Main) { // UI updates on Main
             while (true) {
                 delay(1000)
                 seconds++
                 val timerText = String.format("%02d:%02d", seconds / 60, seconds % 60)
-                val isPaused = _state.value is RecordingState.Paused
-                notificationManager.buildNotification(timerText, isPaused).let {
+                notificationManager.buildNotification(timerText).let {
                     notificationManager.notificationManager.notify(RecordingNotificationManager.NOTIFICATION_ID, it)
                 }
-
-                if (_state.value is RecordingState.Recording) {
-                    _state.value = RecordingState.Recording(seconds)
-                }
-
                 if (seconds > 0 && seconds % 30 == 0) {
                     stopCurrentChunk()
                     startNewChunk()
@@ -130,19 +102,8 @@ class RecordingService : Service() {
     }
 
     companion object {
-        private val _state = MutableStateFlow<RecordingState>(RecordingState.Idle)
-        val state = _state.asStateFlow()
-
         const val ACTION_START = "com.example.twinmind.action.START_RECORDING"
-        const val ACTION_PAUSE = "com.example.twinmind.action.PAUSE_RECORDING"
-        const val ACTION_RESUME = "com.example.twinmind.action.RESUME_RECORDING"
         const val ACTION_STOP = "com.example.twinmind.action.STOP_RECORDING"
         const val EXTRA_TITLE = "EXTRA_TITLE"
     }
-}
-
-sealed class RecordingState {
-    object Idle : RecordingState()
-    data class Recording(val seconds: Int) : RecordingState()
-    data class Paused(val seconds: Int) : RecordingState()
 }

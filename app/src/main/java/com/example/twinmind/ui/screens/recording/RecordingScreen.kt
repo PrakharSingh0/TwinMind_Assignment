@@ -1,10 +1,11 @@
 package com.example.twinmind.ui.screens.recording
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -13,34 +14,12 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -48,29 +27,47 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.twinmind.audio.RecordingState
+import com.example.twinmind.recording.RecordingActions
+import com.example.twinmind.recording.RecordingService
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecordingScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onFinished: (Long) -> Unit
 ) {
     val context = LocalContext.current
     val viewModel: RecordingViewModel = viewModel(factory = RecordingViewModel.Factory)
+    val scope = rememberCoroutineScope()
 
-    val state by viewModel.recordingState.collectAsState()
+    LaunchedEffect(Unit) {
+        viewModel.initialize(context)
+    }
+
+    val state by viewModel.state.collectAsState()
+
+    /* ---------- Permission ---------- */
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) viewModel.onStart(context)
-    }
-
-    LaunchedEffect(state) {
-        if (state is RecordingState.Idle) {
-            onBack()
+        if (granted) {
+            startRecordingService(context)
+            viewModel.startRecording()
         }
     }
+
+
+    val notificationPermissionLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { /* nothing needed */ }
+
+
+    /* ---------- UI ---------- */
 
     Scaffold(
         topBar = {
@@ -78,47 +75,74 @@ fun RecordingScreen(
                 title = { Text("New recording") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "Back")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
         },
+
         bottomBar = {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (state is RecordingState.Recording) {
-                    Button(onClick = { viewModel.onPause(context) }) {
-                        Icon(Icons.Default.Pause, null)
-                    }
-                } else if (state is RecordingState.Paused) {
-                    Button(onClick = { viewModel.onResume(context) }) {
-                        Icon(Icons.Default.Mic, null)
-                    }
-                }
-
-                Button(onClick = {
-                    if (state == RecordingState.Idle) {
-                        val hasPermission =
-                            ContextCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.RECORD_AUDIO
-                            ) == PackageManager.PERMISSION_GRANTED
-
-                        if (hasPermission) {
-                            viewModel.onStart(context)
-                        } else {
-                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                Button(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    onClick = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            if (
+                                ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.POST_NOTIFICATIONS
+                                ) != PackageManager.PERMISSION_GRANTED
+                            ) {
+                                notificationPermissionLauncher.launch(
+                                    Manifest.permission.POST_NOTIFICATIONS
+                                )
+                                return@Button
+                            }
                         }
-                    } else {
-                        viewModel.onStop(context, "Meeting @ ${System.currentTimeMillis()}")
+
+                        if (!state.isRecording) {
+                            val hasPermission =
+                                ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO
+                                ) == PackageManager.PERMISSION_GRANTED
+
+                            if (hasPermission) {
+                                startRecordingService(context)
+                                viewModel.startRecording()
+                            } else {
+                                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        } else {
+                            stopRecordingService(context)
+
+                            val formatter = SimpleDateFormat(
+                                "dd MMM yyyy, HH:mm a",
+                                Locale.getDefault()
+                            )
+                            val autoTitle =
+                                "Meeting @ ${formatter.format(System.currentTimeMillis())}"
+
+                            scope.launch {
+                                val meetingId = viewModel.stopRecording(autoTitle)
+                                if (meetingId > 0) onFinished(meetingId)
+                            }
+                        }
                     }
-                }) {
-                    Icon(if (state == RecordingState.Idle) Icons.Default.Mic else Icons.Default.Stop, null)
+                ) {
+                    Text(
+                        text = if (state.isRecording)
+                            "Stop Recording"
+                        else
+                            "Start Recording"
+                    )
                 }
             }
         }
@@ -133,12 +157,6 @@ fun RecordingScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
-            val (seconds, statusText) = when (val s = state) {
-                is RecordingState.Recording -> s.seconds to "Recording..."
-                is RecordingState.Paused -> s.seconds to "Paused"
-                else -> 0 to "Not recording"
-            }
-
             Text(
                 text = "Capture a new meeting",
                 style = MaterialTheme.typography.titleMedium
@@ -147,32 +165,35 @@ fun RecordingScreen(
             Spacer(Modifier.height(16.dp))
 
             Text(
-                text = String.format("%02d:%02d", seconds / 60, seconds % 60),
+                text = String.format(
+                    "%02d:%02d",
+                    state.totalSeconds / 60,
+                    state.totalSeconds % 60
+                ),
                 style = MaterialTheme.typography.displayLarge
             )
 
             Spacer(Modifier.height(8.dp))
 
             Text(
-                text = statusText,
+                text = state.statusText,
                 style = MaterialTheme.typography.bodyMedium
             )
 
             Spacer(Modifier.height(32.dp))
 
-            RecordingWaveform(
-                isRecording = state is RecordingState.Recording
-            )
+            RecordingWaveform(isRecording = state.isRecording)
         }
     }
 }
 
+/* ---------------------------------------------------
+   🔊 Animated Recording Indicator
+--------------------------------------------------- */
 
 @Composable
-fun RecordingWaveform(
-    isRecording: Boolean
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "")
+fun RecordingWaveform(isRecording: Boolean) {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
 
     val scale by infiniteTransition.animateFloat(
         initialValue = 0.5f,
@@ -181,17 +202,17 @@ fun RecordingWaveform(
             animation = tween(1200, easing = LinearOutSlowInEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = ""
+        label = "scale"
     )
 
     val alpha by infiniteTransition.animateFloat(
         initialValue = 0.6f,
         targetValue = 0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1200), 
+            animation = tween(1200),
             repeatMode = RepeatMode.Restart
         ),
-        label = ""
+        label = "alpha"
     )
 
     Box(
@@ -226,3 +247,23 @@ fun RecordingWaveform(
         )
     }
 }
+
+/* ---------------------------------------------------
+   🔧 Service helpers
+--------------------------------------------------- */
+
+private fun startRecordingService(context: android.content.Context) {
+    val intent = Intent(context, RecordingService::class.java).apply {
+        action = RecordingActions.ACTION_START
+    }
+    ContextCompat.startForegroundService(context, intent)
+}
+
+private fun stopRecordingService(context: android.content.Context) {
+    val intent = Intent(context, RecordingService::class.java).apply {
+        action = RecordingActions.ACTION_STOP
+    }
+    context.startService(intent)
+}
+
+
